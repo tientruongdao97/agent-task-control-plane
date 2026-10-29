@@ -42,14 +42,33 @@ ACP_MCP_TRANSPORT=streamable-http uv run agent-control-mcp
 ```
 
 The default endpoint is `http://127.0.0.1:8001/mcp`. Configure `ACP_MCP_HOST` and `ACP_MCP_PORT`
-when needed. The current static agent identity is suitable for one trusted agent per MCP process.
-Before exposing it to a network, put it behind TLS and an authenticated reverse proxy. Multi-agent
-remote deployment should replace static credentials with OAuth/OIDC and derive agent identity from
-the authenticated request rather than process environment.
+when needed. Each remote agent sends its own Bearer token. The server maps that token to an agent ID
+using `ACP_AGENT_API_KEYS`, and task lease ownership is enforced against that authenticated ID.
 
-`ACP_AGENT_ID` is this project's internal agent identity, not an OAuth client ID. The MVP does not
-register OAuth clients or use an `OAUTH_CLIENT_ID`; that belongs to the production OAuth/OIDC
-upgrade described above.
+```dotenv
+ACP_AGENT_API_KEYS=antigravity:secret-for-antigravity,codex:separate-secret-for-codex
+```
+
+```json
+{
+  "mcpServers": {
+    "agent-tasks": {
+      "serverUrl": "http://127.0.0.1:8001/mcp",
+      "headers": {
+        "Authorization": "Bearer secret-for-antigravity"
+      }
+    }
+  }
+}
+```
+
+Use HTTP only on loopback during development because Bearer tokens require TLS in transit. In
+production, set `ACP_MCP_PUBLIC_URL=https://mcp.example.com` and place the service behind a TLS
+reverse proxy. Static tokens are suitable for an initial controlled deployment; use an external
+OAuth/OIDC issuer, short-lived tokens, rotation, and revocation for an internet-facing service.
+
+`ACP_AGENT_ID` is this project's internal agent identity for local stdio only, not an OAuth client
+ID. HTTP identity always comes from the authenticated request.
 
 ## Antigravity MCP configuration
 

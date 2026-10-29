@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     mcp_transport: str = "stdio"
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8001, ge=1, le=65_535)
+    mcp_public_url: str | None = None
+
+    def effective_mcp_public_url(self) -> str:
+        return self.mcp_public_url or f"http://{self.mcp_host}:{self.mcp_port}"
 
     @field_validator("environment")
     @classmethod
@@ -46,6 +50,8 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "ACP_AGENT_API_KEYS entries must be agent-id:key with 32+ char keys"
                 )
+            if agent_id in result:
+                raise ValueError(f"duplicate agent ID in ACP_AGENT_API_KEYS: {agent_id}")
             result[agent_id] = secret
         return result
 

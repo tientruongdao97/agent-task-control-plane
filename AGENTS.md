@@ -23,6 +23,7 @@ This repository is a security-sensitive task control plane. All coding agents mu
 - Never log API keys, lease tokens, authorization headers, raw prompts, or full source artifacts.
 - Use constant-time comparisons for static credentials.
 - Agent identity comes from authenticated credentials, never from an agent-supplied body field.
+- HTTP agent identity comes from the verified Bearer token subject, never process environment.
 - Every mutation of a claimed task requires the active lease token.
 - Lease tokens are stored as hashes and returned only once.
 - State transitions must be validated server-side.

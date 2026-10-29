@@ -1,6 +1,10 @@
 from typing import Any
 
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from pydantic import AnyHttpUrl
 
 from agent_control_plane.config import Settings, get_settings
 from agent_control_plane.database import Base, build_engine, build_session_factory
@@ -26,12 +30,40 @@ mcp = FastMCP(
 
 
 def _identity(settings: Settings) -> str:
+    access_token = get_access_token()
+    if access_token is not None:
+        identity = access_token.subject or access_token.client_id
+        if not identity:
+            raise AuthorizationError("authenticated token has no agent identity")
+        return identity
     if not settings.agent_id or not settings.agent_api_key:
         raise AuthorizationError("ACP_AGENT_ID and ACP_AGENT_API_KEY are required")
     expected = settings.parsed_agent_api_keys().get(settings.agent_id)
     if expected is None or not constant_time_equal(settings.agent_api_key, expected):
         raise AuthorizationError("invalid agent credential")
     return settings.agent_id
+
+
+class StaticAgentTokenVerifier(TokenVerifier):
+    """Validate per-agent bearer tokens from the configured server-side registry."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._agent_keys = settings.parsed_agent_api_keys()
+        if not self._agent_keys:
+            raise ValueError("ACP_AGENT_API_KEYS must contain at least one agent for MCP HTTP")
+        self._resource = f"{settings.effective_mcp_public_url().rstrip('/')}/mcp"
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        for agent_id, expected in self._agent_keys.items():
+            if constant_time_equal(token, expected):
+                return AccessToken(
+                    token=token,
+                    client_id=agent_id,
+                    subject=agent_id,
+                    scopes=["tasks:work"],
+                    resource=self._resource,
+                )
+        return None
 
 
 def _service() -> tuple[TaskService, Any, Settings]:
@@ -201,6 +233,31 @@ def run() -> None:
 
 def run_http() -> None:
     settings = get_settings()
-    mcp.settings.host = settings.mcp_host
-    mcp.settings.port = settings.mcp_port
-    mcp.run(transport="streamable-http")
+    public_url = settings.effective_mcp_public_url().rstrip("/")
+    http_mcp = FastMCP(
+        "agent-task-control-plane",
+        instructions=mcp.instructions,
+        host=settings.mcp_host,
+        port=settings.mcp_port,
+        token_verifier=StaticAgentTokenVerifier(settings),
+        auth=AuthSettings(
+            issuer_url=AnyHttpUrl(public_url),
+            resource_server_url=AnyHttpUrl(f"{public_url}/mcp"),
+            required_scopes=["tasks:work"],
+            validate_token_resource=True,
+        ),
+    )
+    for tool in (
+        list_available_tasks,
+        get_task,
+        claim_task,
+        start_task,
+        heartbeat,
+        report_progress,
+        report_test,
+        propose_issue,
+        submit_result,
+        release_task,
+    ):
+        http_mcp.add_tool(tool)
+    http_mcp.run(transport="streamable-http")
