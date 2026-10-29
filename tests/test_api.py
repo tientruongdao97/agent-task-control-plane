@@ -18,7 +18,7 @@ def test_admin_dashboard_is_served(settings: Settings) -> None:
         response = client.get("/admin")
 
     assert response.status_code == 200
-    assert "Agent Task Control Plane" in response.text
+    assert "Orbit — Agent Operations" in response.text
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 
