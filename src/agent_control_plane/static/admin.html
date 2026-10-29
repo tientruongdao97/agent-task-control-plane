@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent Task Control Plane</title>
+  <style>
+    :root { color-scheme: dark; font: 15px system-ui, sans-serif; background:#0b1020; color:#e8ecf4 }
+    * { box-sizing:border-box } body { margin:0 } button,input,textarea,select { font:inherit }
+    header { display:flex; gap:16px; align-items:center; padding:18px 24px; border-bottom:1px solid #27304a }
+    header h1 { font-size:18px; margin:0; flex:1 } main { display:grid; grid-template-columns:360px 1fr; min-height:calc(100vh - 66px) }
+    aside,.content { padding:20px; overflow:auto } aside { border-right:1px solid #27304a }
+    .card { background:#131a2e; border:1px solid #27304a; border-radius:10px; padding:14px; margin-bottom:12px; cursor:pointer }
+    .card:hover,.card.active { border-color:#6d8cff } .muted { color:#99a4bd } .row { display:flex; gap:8px; align-items:center }
+    .badge { border-radius:999px; background:#27304a; padding:3px 8px; font-size:12px }
+    label { display:block; margin:12px 0 5px } input,textarea,select { width:100%; background:#0d1426; color:#e8ecf4; border:1px solid #35405e; border-radius:7px; padding:9px }
+    textarea { min-height:90px; resize:vertical } button { background:#5878f6; color:white; border:0; border-radius:7px; padding:9px 13px; cursor:pointer }
+    button.secondary { background:#27304a } button.danger { background:#a53c50 } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#0d1426; padding:12px; border-radius:7px }
+    dialog { width:min(640px,90vw); background:#131a2e; color:#e8ecf4; border:1px solid #35405e; border-radius:12px }
+    .error { color:#ff8899 } @media(max-width:800px){ main{grid-template-columns:1fr} aside{border-right:0;border-bottom:1px solid #27304a} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Agent Task Control Plane</h1>
+    <span id="connection" class="muted">Not connected</span>
+    <button class="secondary" onclick="setKey()">API key</button>
+    <button onclick="openCreate()">New task</button>
+  </header>
+  <main>
+    <aside><div class="row"><h2 style="flex:1">Tasks</h2><button class="secondary" onclick="loadTasks()">Refresh</button></div><div id="tasks"></div></aside>
+    <section class="content"><div id="detail" class="muted">Choose a task to inspect its requirements, lease state, test reports, and event history.</div></section>
+  </main>
+  <dialog id="createDialog">
+    <form id="createForm"><h2>Create task</h2>
+      <label>Title</label><input name="title" maxlength="200" required>
+      <label>Description</label><textarea name="description" maxlength="20000" required></textarea>
+      <label>Repository</label><input name="repository" maxlength="500" required placeholder="owner/repository">
+      <label>Base branch</label><input name="base_branch" value="main" maxlength="200" required>
+      <label>Acceptance criteria (one per line)</label><textarea name="criteria"></textarea>
+      <label>Priority</label><select name="priority"><option>normal</option><option>low</option><option>high</option><option>critical</option></select>
+      <p id="formError" class="error"></p><div class="row"><button type="submit">Create</button><button type="button" class="secondary" onclick="createDialog.close()">Cancel</button></div>
+    </form>
+  </dialog>
+  <script>
+    const tasksEl=document.querySelector('#tasks'), detailEl=document.querySelector('#detail'), createDialog=document.querySelector('#createDialog');
+    let selected=null;
+    function key(){return sessionStorage.getItem('adminApiKey')||''}
+    function setKey(){const value=prompt('Administrator API key',key());if(value!==null){sessionStorage.setItem('adminApiKey',value);loadTasks()}}
+    async function api(path,options={}){const response=await fetch(path,{...options,headers:{'Content-Type':'application/json','X-API-Key':key(),...(options.headers||{})}});if(!response.ok){const body=await response.json().catch(()=>({detail:response.statusText}));throw new Error(body.detail||'Request failed')}return response.json()}
+    function text(tag,value,cls=''){const el=document.createElement(tag);el.textContent=value;if(cls)el.className=cls;return el}
+    async function loadTasks(){try{const tasks=await api('/v1/tasks');document.querySelector('#connection').textContent='Connected';tasksEl.replaceChildren();for(const task of tasks){const card=document.createElement('div');card.className='card'+(task.id===selected?' active':'');card.append(text('strong',task.title),text('div',`${task.status} · ${task.priority}`,'muted'),text('div',task.repository,'muted'));card.onclick=()=>showTask(task.id);tasksEl.append(card)}if(!tasks.length)tasksEl.append(text('p','No tasks yet.','muted'))}catch(error){document.querySelector('#connection').textContent='Authentication required';tasksEl.replaceChildren(text('p',error.message,'error'))}}
+    async function showTask(id){selected=id;await loadTasks();try{const task=await api(`/v1/tasks/${id}`);detailEl.replaceChildren(text('h2',task.title),text('div',`${task.status} · ${task.priority}`,'badge'),text('h3','Description'),text('p',task.description),text('h3','Repository'),text('p',`${task.repository} @ ${task.base_branch}`),text('h3','Acceptance criteria'));const list=document.createElement('ul');for(const item of task.acceptance_criteria)list.append(text('li',item));detailEl.append(list);if(['submitted','proposed'].includes(task.status)){const row=document.createElement('div');row.className='row';for(const decision of ['accept','reject']){const button=text('button',decision);if(decision==='reject')button.className='danger';button.onclick=()=>review(id,decision);row.append(button)}detailEl.append(text('h3','Review'),row)}detailEl.append(text('h3','Result'),text('pre',JSON.stringify(task.result,null,2)),text('h3','Event timeline'));for(const event of task.events){detailEl.append(text('strong',`${event.event_type} · ${event.actor_id}`),text('div',new Date(event.created_at).toLocaleString(),'muted'),text('pre',JSON.stringify(event.payload,null,2)))}}catch(error){detailEl.replaceChildren(text('p',error.message,'error'))}}
+    async function review(id,decision){const reason=prompt(`Reason to ${decision} this item:`);if(!reason)return;await api(`/v1/tasks/${id}/review`,{method:'POST',body:JSON.stringify({decision,reason})});await showTask(id)}
+    function openCreate(){createDialog.showModal()}
+    document.querySelector('#createForm').onsubmit=async event=>{event.preventDefault();const data=new FormData(event.target);try{const created=await api('/v1/tasks',{method:'POST',body:JSON.stringify({title:data.get('title'),description:data.get('description'),repository:data.get('repository'),base_branch:data.get('base_branch'),acceptance_criteria:String(data.get('criteria')).split('\n').map(x=>x.trim()).filter(Boolean),priority:data.get('priority')})});createDialog.close();event.target.reset();await loadTasks();await showTask(created.id)}catch(error){document.querySelector('#formError').textContent=error.message}};
+    if(!key())setKey();else loadTasks();
+  </script>
+</body>
+</html>

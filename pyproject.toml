@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-task-control-plane"
+version = "0.1.0"
+description = "A secure MCP task and issue control plane for coding agents."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.115,<1",
+  "mcp>=1.9,<2",
+  "pydantic-settings>=2.7,<3",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+dev = [
+  "httpx>=0.28,<1",
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.11,<1",
+]
+
+[project.scripts]
+agent-control-api = "agent_control_plane.api:run"
+agent-control-mcp = "agent_control_plane.mcp_server:run"
+agent-control-mcp-http = "agent_control_plane.mcp_server:run_http"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_control_plane"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "RUF", "ASYNC"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --disable-warnings --cov=agent_control_plane --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+omit = ["src/agent_control_plane/mcp_server.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
